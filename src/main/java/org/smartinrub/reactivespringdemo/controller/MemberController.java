@@ -13,6 +13,10 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Scheduler;
+import reactor.core.scheduler.Schedulers;
+
+import java.util.List;
 
 @Slf4j
 @RestController
@@ -20,8 +24,11 @@ import reactor.core.publisher.Mono;
 @AllArgsConstructor
 public class MemberController {
 
+    // Elastic creates new worker pools as needed, and reuse idle ones
+    // Worker pools that stay idle for too long (default is 60s) are disposed
+    private static final Scheduler SCHEDULER = Schedulers.parallel();
+
     private final MemberRepository repository;
-    
     private final MemberServiceImpl service;
 
     @GetMapping("/{id}")
@@ -32,8 +39,15 @@ public class MemberController {
     }
 
     @GetMapping("/{name}/ids")
-    public Flux<String> getAllMembersByName(@PathVariable("name") String name) {
-        return service.findAllByNameIgnoreCase(name).map(Member::getId);
+    public Mono<List<String>> getAllMembersByName(@PathVariable("name") String name) throws InterruptedException {
+        return service.findAllByNameIgnoreCase(name)
+                .map(Member::getId)
+                .collectList() // will convert the Flux<Member> into a Mono<List<Member>>
+                .flatMap(json ->  {
+                    System.out.println("Thread: " + Thread.currentThread().getName());
+                    return Mono.just(json);
+                })
+                .subscribeOn(SCHEDULER);
     }
 
     @GetMapping
